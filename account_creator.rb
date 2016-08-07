@@ -8,6 +8,7 @@ require 'httpclient'
 require 'terminal-table'
 require 'colorize'
 require 'json'
+require 'gmail'
 
 require 'rubygems'
 exit if Object.const_defined?(:Ocra)
@@ -39,11 +40,10 @@ def parse_cookies(all_cookies)
     cookies
 end
 
-def create_account(thread_index, password, prefix)
+def create_account(thread_index, password, prefix, gmail_user, gmail_pwd, gmail_con)
 
 	httpclient = HTTPClient.new
 	httpclient.ssl_config.verify_mode = OpenSSL::SSL::VERIFY_NONE
-	
 
 	# Pull sign up page
 	sign_up_url = "https://club.pokemon.com/us/pokemon-trainer-club/sign-up/"
@@ -86,8 +86,10 @@ def create_account(thread_index, password, prefix)
 		email = (0...12).map { o[rand(o.length)] }.join
 	end
 	password ||= (0...12).map { o[rand(o.length)] }.join
-	email = "#{email.downcase}@divismail.ru"
-	md5_email = Digest::MD5.hexdigest(email)
+	user = gmail_user.split('@', 2).first
+	domain = "@" + gmail_user.split('@', 2).last
+	email_unescaped = user + "+" + email.downcase + domain
+	email = user + "%2B" + email.downcase + domain
 
 	final_signup_parameters = {
 		'csrfmiddlewaretoken' => csrf_token,
@@ -104,7 +106,6 @@ def create_account(thread_index, password, prefix)
 	headers = {
 		'Referer' => final_signup_url
 	}
-
 	# Send final sign up request
 
 	response = httpclient.post(final_signup_url, final_signup_parameters, headers)
@@ -121,8 +122,12 @@ def create_account(thread_index, password, prefix)
 	tries = 0
 	while !email_arrived
 		begin
-			res = open("http://api.temp-mail.ru/request/mail/id/#{md5_email}").read
-			email_response = res
+			res = gmail_con.inbox.find(:unread, :to => email_unescaped).last
+			res.parts.each do |part|
+				if part.content_type.include?('html')
+					email_response = part.body.encoded
+				end
+			end
 			$status[thread_index] = "email arrived"
 			print_table
 			email_arrived = true
@@ -133,11 +138,8 @@ def create_account(thread_index, password, prefix)
 		end
 	end
 
-	xml = Nokogiri::XML(email_response)
-	mail_text = xml.xpath("//item")[0].xpath("//mail_text_only")
-	mail_text = Nokogiri::HTML(mail_text.text)
-
-	validate_link = mail_text.css("body > table > tbody > tr:nth-child(7) > td > table > tbody > tr > td:nth-child(2) > a").attr('href').value
+	mail_text = Nokogiri::HTML(email_response)
+	validate_link = mail_text.css("table > tbody > tr:nth-child(7) > td > table > tbody > tr > td:nth-child(2) > a").attr('href').value
 
 	validated = false
 	while !validated
@@ -215,6 +217,10 @@ $status = []
 $threads = $conf['threads']
 $conf['username_prefix'] ||= false
 
+if $conf['gmail_username'] == "CHANGE_ME" && $conf['gmail_pwd'] == "CHANGE_ME"
+	print "Please set gmail credentials"
+	exit
+end
 
 print "\e[H\e[2J"
 def print_table
@@ -229,9 +235,6 @@ def print_table
 	##### UP for headers			#UP for each rows 		Up for Totals row and empty row
 end
 
-
-
-
 threads = []
 $threads.times do |i|
 	$counter[i] = 0
@@ -242,9 +245,11 @@ $threads.times do |i|
 
     threads << Thread.new do
     	
+    	gmail = Gmail.connect($conf['gmail_username'], $conf['gmail_pwd'])
+
 		while($counter[i] < $times)
 			begin
-				create_account(i, $conf['password'], $conf['username_prefix'])
+				create_account(i, $conf['password'], $conf['username_prefix'], $conf['gmail_username'], $conf['gmail_pwd'], gmail)
 				$counter[i] += 1
 				$try_count[i] += 1
 			rescue => e
@@ -253,6 +258,9 @@ $threads.times do |i|
 			end
 			print_table
 		end
+
+		gmail.logout
+
 	end
 	print_table
 	sleep(1)

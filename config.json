@@ -7,6 +7,10 @@
 	"threads": 1,
 	"accounts_per_thread": 10,
 
+	"_info": "gmail account used to recive activation emails",
+	"gmail_username": "CHANGE_ME",
+	"gmail_pwd": "CHANGE_ME",
+
 	"_info": "file output",
 	"output_password": true,
 	"start_of_line": "",
